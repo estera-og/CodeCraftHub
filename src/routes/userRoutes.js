@@ -1,28 +1,38 @@
+/**
+ * User routes
+ *
+ * Maps HTTP paths to controller methods.
+ * Public routes:
+ *   POST /users/register
+ *   POST /users/login
+ *   POST /users/refresh
+ *
+ * Authenticated routes:
+ *   GET  /users/me
+ *   PATCH /users/me
+ *
+ * Admin routes:
+ *   GET   /users
+ *   GET   /users/:id
+ *   PATCH /users/:id
+ */
+
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { userController } from '../controllers/userController.js';
 import { requireAuth, requireRole } from '../middlewares/authMiddleware.js';
 
 const router = Router();
 
-// Auth rate limit
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-// Auth
+// Public authentication routes
 router.post('/register', userController.register);
-router.post('/login', loginLimiter, userController.login);
+router.post('/login', userController.login);
 router.post('/refresh', userController.refresh);
 
-// Self service
+// Routes for the current user
 router.get('/me', requireAuth, userController.me);
 router.patch('/me', requireAuth, userController.updateMe);
 
-// Admin
+// Admin only
 router.get('/', requireAuth, requireRole('admin'), userController.list);
 router.get('/:id', requireAuth, requireRole('admin'), userController.getById);
 router.patch('/:id', requireAuth, requireRole('admin'), userController.adminUpdate);

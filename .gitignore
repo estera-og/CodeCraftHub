@@ -1,5 +1,29 @@
-node_modules
+cat > .gitignore <<'EOF'
+# Node dependencies
+node_modules/
+
+# Environment files
 .env
-coverage
+.env.*
+!.env.example
+
+# Logs and reports
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+coverage/
+
+# Build and cache artefacts
+dist/
+build/
+.tmp/
+.cache/
+.vscode/
 .DS_Store
+
+# OS files
+Thumbs.db
+EOF

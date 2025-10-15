@@ -1,3 +1,14 @@
+/**
+ * User controller
+ *
+ * Handles HTTP requests and responses for user related tasks.
+ * Validates input, calls the service layer, and shapes the output.
+ * Security:
+ *  - Never return password fields
+ *  - Normalise emails before lookups
+ *  - Use role claims in the access token for authorisation
+ */
+
 import createError from 'http-errors';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
@@ -5,13 +16,17 @@ import argon2 from 'argon2';
 import { userService } from '../services/userService.js';
 import { env } from '../config/env.js';
 
-// Remove sensitive fields before returning to clients
+/**
+ * Remove sensitive fields before returning data to clients.
+ * This is a final safety net. The model also hides some fields by default.
+ */
 const sanitize = (u) => {
   if (!u) return u;
   const { passwordHash, resetTokenHash, ...safe } = u;
   return safe;
 };
 
+/** Validation schemas */
 const registerSchema = Joi.object({
   email: Joi.string().email().required(),
   name: Joi.string().max(120).allow(''),
@@ -24,9 +39,10 @@ const loginSchema = Joi.object({
 });
 
 const updateMeSchema = Joi.object({
-    name: Joi.string().max(120)
-  }).min(1);  
+  name: Joi.string().max(120)
+}).min(1);
 
+/** JWT helpers */
 function signAccess(sub, claims = {}) {
   return jwt.sign({ sub, ...claims }, env.jwtAccessSecret, { expiresIn: env.accessTtl });
 }
@@ -35,17 +51,29 @@ function signRefresh(sub) {
 }
 
 export const userController = {
-  // Auth
+  /**
+   * POST /users/register
+   * Create a new account. Returns the new id.
+   */
   async register(req, res, next) {
     try {
-      const { error, value } = registerSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
+      // validate body and remove unknown fields
+      const { error, value } = registerSchema.validate(req.body || {}, {
+        abortEarly: false,
+        stripUnknown: true
+      });
+      if (error) {
+        throw createError(400, error.details.map((d) => d.message).join(', '));
+      }
 
+      // normalise email for uniqueness
       const email = value.email.trim().toLowerCase();
 
+      // prevent duplicate accounts
       const existing = await userService.getByEmail(email);
       if (existing) throw createError(409, 'Email already in use');
 
+      // hash password and create user
       const passwordHash = await argon2.hash(value.password);
       const user = await userService.create({
         email,
@@ -60,22 +88,34 @@ export const userController = {
     }
   },
 
+  /**
+   * POST /users/login
+   * Verify credentials and issue tokens.
+   */
   async login(req, res, next) {
     try {
-      const { error, value } = loginSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
+      const { error, value } = loginSchema.validate(req.body || {}, {
+        abortEarly: false,
+        stripUnknown: true
+      });
+      if (error) {
+        throw createError(400, error.details.map((d) => d.message).join(', '));
+      }
 
       const email = value.email.trim().toLowerCase();
 
+      // include passwordHash for verification
       const user = await userService.getByEmail(email, { includePassword: true });
-
       if (!user || !user.passwordHash) throw createError(401, 'Invalid credentials');
 
       const ok = await argon2.verify(user.passwordHash, value.password);
       if (!ok) throw createError(401, 'Invalid credentials');
 
-      // record successful login
-      await userService.updateById(user._id, { lastLoginAt: new Date(), failedLoginCount: 0 });
+      // record successful login for audit and future policy
+      await userService.updateById(user._id, {
+        lastLoginAt: new Date(),
+        failedLoginCount: 0
+      });
 
       const access = signAccess(String(user._id), { role: user.role });
       const refresh = signRefresh(String(user._id));
@@ -85,6 +125,10 @@ export const userController = {
     }
   },
 
+  /**
+   * POST /users/refresh
+   * Exchange a valid refresh token for a new access token.
+   */
   async refresh(req, res, next) {
     try {
       const body = req.body || {};
@@ -100,11 +144,15 @@ export const userController = {
       const access = signAccess(String(user._id), { role: user.role });
       res.json({ accessToken: access });
     } catch (_e) {
+      // conceal exact reason from clients
       next(createError(401, 'Invalid token'));
     }
   },
 
-  // Self service
+  /**
+   * GET /users/me
+   * Return the caller’s profile.
+   */
   async me(req, res, next) {
     try {
       if (!req.user || !req.user.sub) throw createError(401, 'Unauthorised');
@@ -116,11 +164,20 @@ export const userController = {
     }
   },
 
+  /**
+   * PATCH /users/me
+   * Update the caller’s own profile. Only safe fields are allowed.
+   */
   async updateMe(req, res, next) {
     try {
       if (!req.user || !req.user.sub) throw createError(401, 'Unauthorised');
-      const { error, value } = updateMeSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
+      const { error, value } = updateMeSchema.validate(req.body || {}, {
+        abortEarly: false,
+        stripUnknown: true
+      });
+      if (error) {
+        throw createError(400, error.details.map((d) => d.message).join(', '));
+      }
 
       const updated = await userService.updateById(req.user.sub, value);
       res.json(sanitize(updated));
@@ -129,7 +186,10 @@ export const userController = {
     }
   },
 
-  // Admin
+  /**
+   * GET /users
+   * Admin only. Returns paginated users with optional search.
+   */
   async list(req, res, next) {
     try {
       const page = Math.max(1, Number(req.query.page || 1));
@@ -143,6 +203,10 @@ export const userController = {
     }
   },
 
+  /**
+   * GET /users/:id
+   * Admin only. Fetch a single user by id.
+   */
   async getById(req, res, next) {
     try {
       const user = await userService.getById(req.params.id);
@@ -153,6 +217,10 @@ export const userController = {
     }
   },
 
+  /**
+   * PATCH /users/:id
+   * Admin only. Update role, name, or activation state.
+   */
   async adminUpdate(req, res, next) {
     try {
       const patchSchema = Joi.object({
@@ -161,8 +229,13 @@ export const userController = {
         isActive: Joi.boolean()
       }).min(1);
 
-      const { error, value } = patchSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
+      const { error, value } = patchSchema.validate(req.body || {}, {
+        abortEarly: false,
+        stripUnknown: true
+      });
+      if (error) {
+        throw createError(400, error.details.map((d) => d.message).join(', '));
+      }
 
       const updated = await userService.updateById(req.params.id, value);
       if (!updated) throw createError(404, 'User not found');

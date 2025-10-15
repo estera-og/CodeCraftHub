@@ -39,10 +39,9 @@ export const userController = {
   // Auth
   async register(req, res, next) {
     try {
-      const { error, value } = registerSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map(d => d.message).join(', '));
+      const { error, value } = registerSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
+      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
 
-      // normalise here
       const email = value.email.trim().toLowerCase();
 
       const existing = await userService.getByEmail(email);
@@ -64,10 +63,9 @@ export const userController = {
 
   async login(req, res, next) {
     try {
-      const { error, value } = loginSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map(d => d.message).join(', '));
+      const { error, value } = loginSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
+      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
 
-      // normalise here
       const email = value.email.trim().toLowerCase();
 
       const user = await userService.getByEmail(email);
@@ -76,12 +74,11 @@ export const userController = {
       const ok = await argon2.verify(user.passwordHash, value.password);
       if (!ok) throw createError(401, 'Invalid credentials');
 
-      // record successful login here
+      // record successful login
       await userService.updateById(user._id, { lastLoginAt: new Date(), failedLoginCount: 0 });
 
       const access = signAccess(String(user._id), { role: user.role });
       const refresh = signRefresh(String(user._id));
-
       res.json({ accessToken: access, refreshToken: refresh });
     } catch (e) {
       next(e);
@@ -90,19 +87,19 @@ export const userController = {
 
   async refresh(req, res, next) {
     try {
-      const token = req.body?.refreshToken;
+      const body = req.body || {};
+      const token = body.refreshToken || null;
       if (!token) throw createError(400, 'Missing refresh token');
 
       const payload = jwt.verify(token, env.jwtRefreshSecret);
       if (payload.typ !== 'refresh') throw createError(401, 'Invalid token');
 
-      // Could also check a store for rotation in a fuller build
       const user = await userService.getById(payload.sub);
       if (!user) throw createError(401, 'Invalid token');
 
       const access = signAccess(String(user._id), { role: user.role });
       res.json({ accessToken: access });
-    } catch (e) {
+    } catch (_e) {
       next(createError(401, 'Invalid token'));
     }
   },
@@ -110,6 +107,7 @@ export const userController = {
   // Self service
   async me(req, res, next) {
     try {
+      if (!req.user || !req.user.sub) throw createError(401, 'Unauthorised');
       const user = await userService.getById(req.user.sub);
       if (!user) throw createError(404, 'User not found');
       res.json(sanitize(user));
@@ -120,8 +118,10 @@ export const userController = {
 
   async updateMe(req, res, next) {
     try {
-      const { error, value } = updateMeSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map(d => d.message).join(', '));
+      if (!req.user || !req.user.sub) throw createError(401, 'Unauthorised');
+      const { error, value } = updateMeSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
+      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
+
       const updated = await userService.updateById(req.user.sub, value);
       res.json(sanitize(updated));
     } catch (e) {
@@ -132,11 +132,11 @@ export const userController = {
   // Admin
   async list(req, res, next) {
     try {
-      const page = Number(req.query.page || 1);
-      const limit = Math.min(Number(req.query.limit || 20), 100);
-      const q = req.query.q;
+      const page = Math.max(1, Number(req.query.page || 1));
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+      const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+
       const data = await userService.list({ page, limit, q });
-      // scrub items before returning
       res.json({ ...data, items: data.items.map(sanitize) });
     } catch (e) {
       next(e);
@@ -161,8 +161,8 @@ export const userController = {
         isActive: Joi.boolean()
       }).min(1);
 
-      const { error, value } = patchSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
-      if (error) throw createError(400, error.details.map(d => d.message).join(', '));
+      const { error, value } = patchSchema.validate(req.body || {}, { abortEarly: false, stripUnknown: true });
+      if (error) throw createError(400, error.details.map((d) => d.message).join(', '));
 
       const updated = await userService.updateById(req.params.id, value);
       if (!updated) throw createError(404, 'User not found');

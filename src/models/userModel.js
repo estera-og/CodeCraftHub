@@ -6,11 +6,11 @@ const userSchema = new Schema(
     email: { type: String, required: true, unique: true, trim: true, lowercase: true },
     name: { type: String, default: '' },
     role: { type: String, enum: ['student', 'mentor', 'admin'], default: 'student' },
-    passwordHash: { type: String, required: true },
+    passwordHash: { type: String, required: true, select: false },
     isActive: { type: Boolean, default: true },
     lastLoginAt: { type: Date },
     failedLoginCount: { type: Number, default: 0 },
-    resetTokenHash: { type: String },
+    resetTokenHash: { type: String, select: false },
     resetTokenExpiresAt: { type: Date }
   },
   { timestamps: true }

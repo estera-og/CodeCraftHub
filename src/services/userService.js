@@ -1,3 +1,4 @@
+// src/services/userService.js
 import { User } from '../models/userModel.js';
 
 export const userService = {
@@ -9,8 +10,11 @@ export const userService = {
     return User.findById(id).lean().exec();
   },
 
-  async getByEmail(email) {
-    return User.findOne({ email }).lean().exec();
+  // updated: can include password when needed
+  async getByEmail(email, { includePassword = false } = {}) {
+    const q = User.findOne({ email });
+    if (includePassword) q.select('+passwordHash');
+    return q.lean().exec();
   },
 
   async updateById(id, patch) {
@@ -20,10 +24,7 @@ export const userService = {
   async list({ page = 1, limit = 20, q }) {
     const filter = {};
     if (q) {
-      filter.$or = [
-        { email: new RegExp(q, 'i') },
-        { name: new RegExp(q, 'i') }
-      ];
+      filter.$or = [{ email: new RegExp(q, 'i') }, { name: new RegExp(q, 'i') }];
     }
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([

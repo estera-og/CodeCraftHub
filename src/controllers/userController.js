@@ -24,9 +24,8 @@ const loginSchema = Joi.object({
 });
 
 const updateMeSchema = Joi.object({
-  name: Joi.string().max(120),
-  isActive: Joi.boolean()
-}).min(1);
+    name: Joi.string().max(120)
+  }).min(1);  
 
 function signAccess(sub, claims = {}) {
   return jwt.sign({ sub, ...claims }, env.jwtAccessSecret, { expiresIn: env.accessTtl });
@@ -68,7 +67,8 @@ export const userController = {
 
       const email = value.email.trim().toLowerCase();
 
-      const user = await userService.getByEmail(email);
+      const user = await userService.getByEmail(email, { includePassword: true });
+
       if (!user || !user.passwordHash) throw createError(401, 'Invalid credentials');
 
       const ok = await argon2.verify(user.passwordHash, value.password);
